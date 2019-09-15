@@ -14,7 +14,10 @@ class RevolutApp {
 
     fun start(port: Int): Javalin? {
         app = Javalin.create().apply {
-            exception(Exception::class.java) { e, _ -> e.printStackTrace() }
+            exception(Exception::class.java) { e, ctx ->
+              //  e.printStackTrace()
+                ctx.status(500)
+                ctx.json("${e.message}")}
             error(404) { ctx -> ctx.json("not found") }
         }.start(port)
         val injector = Guice.createInjector(RevolutModule())

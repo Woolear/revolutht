@@ -3,12 +3,13 @@ package revolut
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-open class InMemoryRepo<T : HasId>() : Repo<T> {
+abstract class InMemoryRepo<T : HasId>() : Repo<T> {
 
     private val backingHM = ConcurrentHashMap<Int, T>()
     private val nextId = AtomicInteger(0)
+    protected abstract val entityName:String
     override fun get(id: Int): T {
-        require(backingHM.containsKey(id)) { "Entity with id $id not exists" }
+        require(backingHM.containsKey(id)) { "$entityName with id $id not exists" }
         return backingHM[id]!!
     }
 
@@ -18,7 +19,7 @@ open class InMemoryRepo<T : HasId>() : Repo<T> {
 
     override fun update(entity: T): T {
         val id = entity.id
-        require(backingHM.containsKey(id)) { "Entity with id $id not exists" }
+        require(backingHM.containsKey(id)) { "$entityName with id $id not exists" }
         backingHM[entity.id] = entity
         return entity
     }
@@ -30,7 +31,7 @@ open class InMemoryRepo<T : HasId>() : Repo<T> {
         return entity
     }
     override fun delete(id: Int) {
-        require(backingHM.containsKey(id)) { "Entity with id $id not exists" }
+        require(backingHM.containsKey(id)) { "$entityName with id $id not exists" }
         backingHM.remove(id)
     }
 }

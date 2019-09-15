@@ -4,6 +4,7 @@
 package revolut
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.github.kittinunf.fuel.core.FuelError
 import com.github.kittinunf.fuel.core.FuelManager
 import com.github.kittinunf.fuel.httpGet
 import com.github.kittinunf.fuel.httpPost
@@ -11,6 +12,7 @@ import com.github.kittinunf.fuel.jackson.responseObject
 import com.github.kittinunf.result.failure
 import com.github.kittinunf.result.success
 import io.javalin.Javalin
+import io.javalin.plugin.openapi.annotations.ContentType
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation
@@ -42,12 +44,12 @@ class FullTest {
     private val opsApiPath = "api/operations/"
     @Test
     @Order(1)
-    fun `create account`() {
+    fun `should create 4 accounts`() {
         val accs = arrayOf(
-                Account("test1", 100.0, "RUB"),
-                Account("test2", 100.0, "RUB"),
-                Account("test3", 100.0, "RUB"),
-                Account("test4", 100.0, "RUB")
+                Account("test1", 0.0, "RUB"),
+                Account("test2", 0.0, "RUB"),
+                Account("test3", 0.0, "RUB"),
+                Account("test4", 0.0, "RUB")
         )
         accs.forEach {
             val (_, _, result) = accountApiPath.httpPost().body(jacksonObjectMapper().writeValueAsBytes(it)).responseObject<Account>()
@@ -55,7 +57,7 @@ class FullTest {
                 assertTrue { returnedAcc.id > 0 }
                 println(result)
             }
-            result.failure { failData -> fail(failData.message) }
+            result.failure { failData -> fail(failData.response.body().asString(ContentType.JSON)) }
         }
     }
 
@@ -68,19 +70,39 @@ class FullTest {
             println(it)
         }
         result.failure {
-            fail(it.message)
+            fail(it.response.body().asString(ContentType.JSON))
         }
     }
 
     @Test
     @Order(3)
-    fun `should get error for non-existing account`() {
+    fun `should fail non-existing account`() {
         val (_, _, result) = "$accountApiPath/100".httpGet().responseObject<Account>()
         result.success {
             fail("")
         }
         result.failure {
-            assertEquals(404, it.response.statusCode)
+            println(it.response.body().asString(ContentType.JSON))
+        }
+    }
+
+    @Test
+    @Order(3)
+    fun `should fail creating accounts`() {
+        val accs = arrayOf(
+                Account("test1", 1.0, "RUB"),
+                Account("test2", 0.1, "RUB"),
+                Account("test3", -1.0, "RUB"),
+                Account("test4", -0.1, "RUB")
+        )
+        accs.forEach { acc ->
+            val (_, resp, result) = accountApiPath.httpPost().body(jacksonObjectMapper().writeValueAsBytes(acc)).response()
+            result.success {
+                fail("")
+            }
+            result.failure {
+                println(it.response.body().asString(ContentType.JSON))
+            }
         }
     }
 
@@ -92,14 +114,58 @@ class FullTest {
             arrayOfAccounts.forEach { println(it) }
         }
         result.failure {
-            assertEquals(404, it.response.statusCode)
+            fail(it.response.body().asString(ContentType.JSON))
         }
     }
 
     @Test
+    @Order(4)
+    fun `should process all concurrent opening operations correctly`() {
+
+        sendOperationsInParallel(openingOperations, { returnedOp ->
+            println(returnedOp)
+            assertEquals(OperationState.Accepted, returnedOp.state)
+
+        }, {
+            fail(it.message)
+        }, 1)
+
+        val (_, _, result) = accountApiPath.httpGet().responseObject<Array<Account>>()
+        result.success { arrayOfAccounts ->
+            arrayOfAccounts.forEach {
+                println(it)
+                assertEquals(100.0, it.balance)
+            }
+
+        }
+        result.failure {
+            fail(it.response.body().asString(ContentType.JSON))
+        }
+    }
+
+    private val openingOperations = arrayOf(
+            Operation(1, 1, 100.0, operationType = OperationType.Opening),
+            Operation(2, 2, 100.0, operationType = OperationType.Opening),
+            Operation(3, 3, 100.0, operationType = OperationType.Opening),
+            Operation(4, 4, 100.0, operationType = OperationType.Opening)
+
+    )
+
+    @Test
     @Order(5)
+    fun `should fail all concurrent opening operations`() {
+
+        sendOperationsInParallel(openingOperations, { returnedOp ->
+            assertEquals(OperationState.Rejected, returnedOp.state)
+            println(returnedOp)
+        }, {
+            println(it.response.body().asString(ContentType.JSON))
+        }, 1)
+    }
+
+    @Test
+    @Order(6)
     fun `should process all concurrent operations correctly`() {
-        val executor = Executors.newFixedThreadPool(4)
         val amount = 5.0
         val ops = arrayOf(
                 Operation(2, 1, amount),
@@ -107,62 +173,62 @@ class FullTest {
                 Operation(1, 3, amount)
 
         )
-        for (i in 0..100) {
-            executor.invokeAll(ops.map { Callable { opsApiPath.httpPost().body(jacksonObjectMapper().writeValueAsBytes(it)).responseObject<Operation>() } }).reversed().forEach { future ->
-                val (_, _, result) = future.get()
+        sendOperationsInParallel(ops, { returnedOp ->
+            assertEquals(OperationState.Accepted, returnedOp.state)
+            println(returnedOp)
+        }, {
+            fail(it.message)
+        }, 100)
 
-                result.success { returnedOp ->
-                    assertEquals(OperationState.Accepted, returnedOp.state)
-                    println(returnedOp)
-                }
-                result.failure {
-                    fail(it.message)
-                }
-            }
-        }
         val (_, _, result) = accountApiPath.httpGet().responseObject<Array<Account>>()
         result.success { arrayOfAccounts ->
             arrayOfAccounts.forEach {
                 println(it)
-                assertEquals(100.0, it.balance) }
+                assertEquals(100.0, it.balance)
+            }
 
         }
         result.failure {
-            assertEquals(404, it.response.statusCode)
+            fail(it.response.body().asString(ContentType.JSON))
         }
     }
 
     @Test
-    @Order(5)
+    @Order(7)
     fun `should reject all operations`() {
-        val executor = Executors.newFixedThreadPool(4)
         val amount = 5.0
         val ops = arrayOf(
                 Operation(1, 1, amount),
                 Operation(3, 2, amount * 1000),
                 Operation(1, 3, amount - 1000),
-                Operation(-1, 3, 1.0),
-                Operation(1, -3, 2.0)
+                Operation(-1, 3, amount),
+                Operation(1, -3, amount)
         )
-        for (i in 0..100) {
-            executor.invokeAll(ops.map { Callable { opsApiPath.httpPost().body(jacksonObjectMapper().writeValueAsBytes(it)).responseObject<Operation>() } }).reversed().forEach { future ->
+        sendOperationsInParallel(ops, { op ->
+            assertEquals(OperationState.Rejected, op.state)
+            println(op.toString())
+        }, {
+            println(it.response.body().asString(ContentType.JSON))
+        }, 100)
+    }
+
+    private fun sendOperationsInParallel(ops: Array<Operation>, onSuccess: (Operation) -> Unit, onFail: (FuelError) -> Unit, n: Int) {
+        val executor = Executors.newFixedThreadPool(4)
+
+        for (i in 1..n) {
+            executor.invokeAll(ops.map { Callable { opsApiPath.httpPost().body(jacksonObjectMapper().writeValueAsBytes(it)).responseObject<Operation>() } }).forEach { future ->
                 val (_, _, result) = future.get()
 
-                result.success { returnedOp ->
-                    assertEquals(OperationState.Rejected, returnedOp.state)
-                    println(returnedOp)
-                }
-                result.failure {
-                    fail(it.message)
-                }
+                result.success(onSuccess)
+                result.failure(onFail)
             }
         }
     }
 
     @Test
-    @Order(6)
+    @Order(8)
     fun `get operations`() {
-        for (i in 1..3) {
+        for (i in 1..50) {
 
             val (_, _, result) = (opsApiPath + i.toString()).httpGet().responseObject<Operation>()
 
@@ -171,7 +237,7 @@ class FullTest {
                 println(returnedOp)
             }
             result.failure {
-                fail(it.message)
+                fail(it.response.body().asString(ContentType.JSON))
             }
         }
     }
