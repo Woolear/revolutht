@@ -3,11 +3,10 @@ package revolut
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-open class InMemoryRepo<T : HasId> : Repo<T> {
+open class InMemoryRepo<T : HasId>() : Repo<T> {
 
     private val backingHM = ConcurrentHashMap<Int, T>()
     private val nextId = AtomicInteger(0)
-
     override fun get(id: Int): T {
         require(backingHM.containsKey(id)) { "Entity with id $id not exists" }
         return backingHM[id]!!

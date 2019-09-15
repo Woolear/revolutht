@@ -18,11 +18,12 @@ class RevolutApp {
             error(404) { ctx -> ctx.json("not found") }
         }.start(port)
         val injector = Guice.createInjector(RevolutModule())
-        //account CRUD
+        //account CRU
         crudRoutes<Account>(app, "api/account", injector.getInstance())
-        val accountOperationManager = injector.getInstance<AccountOperationManager>()
-        val executor = Executors.newScheduledThreadPool(6)
+
         app.routes {
+            val accountOperationManager = injector.getInstance<AccountOperationManager>()
+            val executor = Executors.newScheduledThreadPool(6)
             val operationsRepo = injector.getInstance<Repo<Operation>>()
             get("/api/operations/:id") { ctx ->
                 ctx.json(CompletableFuture<Operation>().apply { executor.submit { this.complete(injector.getInstance<Repo<Operation>>().get(ctx.pathParam("id").toInt())) } })
@@ -64,7 +65,6 @@ inline fun <reified T : HasId> crudRoutes(app: Javalin, path: String, repo: Repo
             val saved = repo.save(entity)
             ctx.json(saved)
             ctx.status(201)
-
         }
     }
 }
