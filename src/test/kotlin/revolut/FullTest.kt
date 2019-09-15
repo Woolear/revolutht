@@ -3,10 +3,7 @@
  */
 package revolut
 
-import com.anarsoft.vmlens.concurrent.junit.ConcurrentTestRunner
-import com.anarsoft.vmlens.concurrent.junit.ThreadCount
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.github.kittinunf.fuel.core.FuelError
 import com.github.kittinunf.fuel.core.FuelManager
 import com.github.kittinunf.fuel.httpGet
 import com.github.kittinunf.fuel.httpPost
@@ -17,13 +14,8 @@ import io.javalin.Javalin
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation
-import org.junit.runner.RunWith
-import java.time.Instant
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
-import java.util.concurrent.Future
-import kotlin.random.Random
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -119,6 +111,7 @@ class FullTest {
 
                 result.success { returnedOp ->
                     assertEquals(OperationState.Accepted, returnedOp.state)
+                    println(returnedOp)
                 }
                 result.failure {
                     fail(it.message)
@@ -131,6 +124,32 @@ class FullTest {
         }
         result.failure {
             assertEquals(404, it.response.statusCode)
+        }
+    }
+    @Test
+    @Order(5)
+    fun `should reject all operations`() {
+        val executor = Executors.newFixedThreadPool(4)
+        val amount = 5.0
+        val ops = arrayOf(
+                Operation(1, 1, amount),
+                Operation(3, 2, amount*1000),
+                Operation(1, 3, amount-1000),
+                Operation(-1, 3, 1.0),
+                Operation(1, -3, 2.0)
+        )
+        for (i in 0..100) {
+            executor.invokeAll(ops.map { Callable { "api/operations/".httpPost().body(jacksonObjectMapper().writeValueAsBytes(it)).responseObject<Operation>() } }).reversed().forEach { future ->
+                val (_, _, result) = future.get()
+
+                result.success { returnedOp ->
+                    assertEquals(OperationState.Rejected, returnedOp.state)
+                    println(returnedOp)
+                }
+                result.failure {
+                    fail(it.message)
+                }
+            }
         }
     }
 }

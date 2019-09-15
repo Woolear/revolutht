@@ -11,10 +11,10 @@ class AccountOperationManager @Inject constructor(private val operationsReposito
         val op = operationsRepository.get(id)
         return try {
             require(op.debit != op.credit) { "debit must not be eq to credit" }
-            require(op.amount > 0.0) { "amount must be >0" }
+            require(op.amount > 0.0) { "amount must be > 0" }
             //if we put lock only at write, other threads can acquire not actual data, so read locked too
             //to test it remove sync, and watch test "should process all concurrent operations correctly"
-           synchronized(_accountLock) {
+            synchronized(_accountLock) {
                 val debitAcc = accountRepository.get(op.debit)
                 val creditAcc = accountRepository.get(op.credit)
                 require(creditAcc.balance >= op.amount) { "Insufficient funds" }
@@ -27,7 +27,7 @@ class AccountOperationManager @Inject constructor(private val operationsReposito
             }
         } catch (ex: Exception) {
             synchronized(_accountLock) {
-                 operationsRepository.update(op.copy(state = OperationState.Rejected))
+                operationsRepository.update(op.copy(state = OperationState.Rejected, comment = ex.message ?: ""))
             }
         }
     }
